@@ -52,14 +52,53 @@ print(f"[·] Rainfall data: {RAINFALL_DATA}")
 # CORE DATA PIPELINE FUNCTIONS
 # ============================================================================
 
+# Month column names
+MONTH_COLS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 
+              'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
+
 def load_rainfall_data():
-    """Load rainfall data from CSV"""
+    """Load and convert rainfall data from wide to long format"""
     if not os.path.exists(RAINFALL_DATA):
         raise FileNotFoundError(f"Rainfall data not found at {RAINFALL_DATA}")
     
     df = pd.read_csv(RAINFALL_DATA)
     print(f"[✓] Loaded rainfall data: {df.shape[0]} rows, {df.shape[1]} columns")
-    return df
+    
+    # Standardize column names
+    df.columns = [c.strip().upper().replace("-", "_").replace(" ", "_") for c in df.columns]
+    
+    # Convert from wide to long format
+    df_long = wide_to_long(df)
+    return df_long
+
+def wide_to_long(df_wide):
+    """Convert year-wide format to one row per (subdivision, year, month)"""
+    records = []
+    for _, row in df_wide.iterrows():
+        try:
+            sub = row.get('SUBDIVISION') or row.get('SUBDIV')
+            year = int(row['YEAR'])
+            for m_idx, col in enumerate(MONTH_COLS, start=1):
+                if col in row.index:
+                    try:
+                        rainfall = float(row[col]) if pd.notna(row[col]) else np.nan
+                    except:
+                        rainfall = np.nan
+                    records.append({
+                        'SUBDIVISION': sub,
+                        'YEAR': year,
+                        'MONTH': m_idx,
+                        'RAINFALL': rainfall,
+                    })
+        except Exception as e:
+            print(f"[!] Error processing row: {e}")
+            continue
+    
+    df_long = pd.DataFrame(records)
+    df_long.dropna(subset=['RAINFALL'], inplace=True)
+    df_long.sort_values(['SUBDIVISION', 'YEAR', 'MONTH'], inplace=True)
+    df_long.reset_index(drop=True, inplace=True)
+    return df_long
 
 def load_climate_indices():
     """Load climate indices (ENSO, IOD)"""
@@ -68,11 +107,13 @@ def load_climate_indices():
         return None
     
     df = pd.read_csv(CLIMATE_INDICES)
+    df.columns = [c.strip().upper() for c in df.columns]
     print(f"[✓] Loaded climate indices: {df.shape[0]} rows")
     return df
 
 def add_seasonal_features(df):
     """Add seasonal features (month sine/cosine)"""
+    df = df.copy()
     df['MONTH_SIN'] = np.sin(2 * np.pi * df['MONTH'] / 12)
     df['MONTH_COS'] = np.cos(2 * np.pi * df['MONTH'] / 12)
     
@@ -116,8 +157,20 @@ def build_dataset(seq_len=24, train_until=1970, val_until=1990,
     
     # Merge climate indices
     if climate_df is not None:
-        rainfall_df = rainfall_df.merge(climate_df, on=['YEAR', 'MONTH'], how='left')
-        rainfall_df.fillna(rainfall_df.mean(), inplace=True)
+        try:
+            rainfall_df = rainfall_df.merge(climate_df[['YEAR', 'MONTH', 'ENSO', 'IOD']], 
+                                           on=['YEAR', 'MONTH'], how='left')
+        except:
+            print("[!] Could not merge climate data, continuing without it")
+            rainfall_df['ENSO'] = 0.0
+            rainfall_df['IOD'] = 0.0
+        
+        # Fill any remaining NaN
+        rainfall_df['ENSO'] = rainfall_df['ENSO'].fillna(0.0)
+        rainfall_df['IOD'] = rainfall_df['IOD'].fillna(0.0)
+    else:
+        rainfall_df['ENSO'] = 0.0
+        rainfall_df['IOD'] = 0.0
     
     # Add features
     rainfall_df = add_seasonal_features(rainfall_df)

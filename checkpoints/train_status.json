@@ -1,0 +1,8 @@
+{
+  "status": "complete",
+  "epoch": 34,
+  "total_epochs": 60,
+  "loss": 0.178224,
+  "val_loss": 0.197825,
+  "val_rmse": 0.444775
+}

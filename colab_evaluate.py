@@ -66,11 +66,19 @@ class RainfallCNNLSTM(nn.Module):
         self.dropout = nn.Dropout(0.3)
     
     def forward(self, x):
+        # Transpose from (batch, seq_len, features) to (batch, features, seq_len)
+        x = x.transpose(1, 2)
+        
+        # CNN
         x = self.relu(self.conv1(x))
         x = self.pool(x)
         x = self.relu(self.conv2(x))
         x = self.pool(x)
+        
+        # Transpose back to (batch, features, seq_len) for LSTM
         x = x.transpose(1, 2)
+        
+        # LSTM
         x, _ = self.lstm(x)
         x = x[:, -1, :]
         x = self.relu(self.fc1(x))
